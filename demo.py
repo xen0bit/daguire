@@ -9,12 +9,22 @@ from tkinter import ttk
 class Node:
     def __init__(self, o: int, v: int | None, ct: int):
         self.offset = o
-        self.text = str(v)
+        self.text = self.getrepr(v)
         self.ratio = ct
         self.coordinates = (0, 0, 0, 0)
 
     def setcordinates(self, coordinates):
         self.coordinates = coordinates
+
+    def getrepr(self, v):
+        if v == None:
+            return str(None)
+        else:
+            o = str(v) + "\n"
+            o += f"0x{v:X}\n"
+            o += f"{v:b}\n"
+            o += chr(v) + "\n"
+            return o
 
 
 class Dag:
@@ -131,6 +141,10 @@ class CanvasApp(tk.Tk):
         self.canvas.bind("<Button-4>", self.on_mousewheel)
         self.canvas.bind("<Button-5>", self.on_mousewheel)
 
+        # Bind click for panning
+        self.canvas.bind("<ButtonPress-1>", self.on_button_press)
+        self.canvas.bind("<B1-Motion>", self.pan_canvas)
+
         # Initial size of the canvas
         self.width = 200
         self.height = 150
@@ -181,6 +195,18 @@ class CanvasApp(tk.Tk):
         # Configure the scroll region to fit the resized content
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
+    def on_button_press(self, event):
+        # Store the last known position of the mouse.
+        self.panx, self.pany = event.x, event.y
+
+    def pan_canvas(self, event):
+        # Calculate the difference between the current and last positions of the mouse.
+        dx = event.x - self.panx
+        dy = event.y - self.pany
+
+        # Update the position of the canvas by moving it by the calculated difference.
+        self.canvas.scan_dragto(dx, dy, gain=1)
+
     def toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
         self.attributes("-fullscreen", self.fullscreen)
@@ -198,7 +224,7 @@ class CanvasApp(tk.Tk):
         ) + padding * (len(nodes) + 1)
 
         # canvas = tk.Canvas(root, width=canvas_width, height=canvas_height, bg="white")
-        #self.canvas.pack(pady=padding)
+        # self.canvas.pack(pady=padding)
 
         x_position = x_offset
         y_position = 0
@@ -223,7 +249,6 @@ class CanvasApp(tk.Tk):
 
             # Update the y_position for the next node
             y_position += height + padding
-            
 
         return nodes
 
@@ -242,8 +267,8 @@ class CanvasApp(tk.Tk):
             # Draw Edges
             if o != 0:
                 print(self.dag.get_edge_counts_by_offsets(o - 1, o))
-            
-            x_offset+=150+horizontal_padding
+
+            x_offset += 150 + horizontal_padding
 
 
 if __name__ == "__main__":
