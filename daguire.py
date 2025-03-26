@@ -9,8 +9,10 @@ from tkinter import ttk
 class Node:
     def __init__(self, o: int, v: int | None, ct: int):
         self.offset = o
+        self.val = v
         self.text = self.getrepr(v)
         self.ratio = ct
+        self.color = self.getcolor(v)
         self.coordinates = (0, 0, 0, 0)
 
     def setcordinates(self, coordinates):
@@ -26,9 +28,33 @@ class Node:
             o += chr(v) + "\n"
             return o
 
+    def getcolor(self, v):
+        if v == None:
+            return "white"
+        elif v == 0xFF:
+            return "white"
+        elif v == 0x00:
+            return "black"
+        elif v < 0x20:
+            # Red
+            r, g, b = (251, 70, 76)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        elif 0x20 <= v <= 0x7F:
+            # Yellow
+            r, g, b = (224, 222, 113)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        elif 0x7F < v <= 0xBF:
+            # Cyan
+            r, g, b = (83, 223, 221)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        else:
+            # Green
+            r, g, b = (68, 207, 110)
+            return f"#{r:02x}{g:02x}{b:02x}"
+
 
 class Dag:
-    def __init__(self, conn: sqlite3.Connection, fmt="hex", sz=8):
+    def __init__(self, conn: sqlite3.Connection, fmt="hex", sz=56):
         self.conn = conn
         self.fmt = fmt
         self.sz = sz
@@ -95,6 +121,8 @@ class CanvasApp(tk.Tk):
     def __init__(self, dag: Dag):
         super().__init__()
         self.dag = dag
+        self.xpad = 120
+        self.ypad = 20
 
         self.title("Canvas Image with Scrollbars and Buttons")
         self.wm_attributes("-zoomed", 1)
@@ -131,7 +159,7 @@ class CanvasApp(tk.Tk):
         self.frame.pack(fill="both", expand=True)
 
         # Set up the canvas
-        self.canvas = tk.Canvas(self.frame, bg="white")
+        self.canvas = tk.Canvas(self.frame, bg="#1e1e1e")
         self.canvas.pack(side="left", fill="both", expand=True)
 
         # Bind mouse wheel event for zooming
@@ -215,45 +243,122 @@ class CanvasApp(tk.Tk):
         else:
             self.geometry("600x400")
 
-    def draw_nodes_on_canvas(self, nodes, x_offset=0, padding=10):
+    def create_round_rectangle(self, x1, y1, x2, y2, r=25, **kwargs):
+        points = (
+            x1 + r,
+            y1,
+            x1 + r,
+            y1,
+            x2 - r,
+            y1,
+            x2 - r,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + r,
+            x2,
+            y1 + r,
+            x2,
+            y2 - r,
+            x2,
+            y2 - r,
+            x2,
+            y2,
+            x2 - r,
+            y2,
+            x2 - r,
+            y2,
+            x1 + r,
+            y2,
+            x1 + r,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - r,
+            x1,
+            y2 - r,
+            x1,
+            y1 + r,
+            x1,
+            y1 + r,
+            x1,
+            y1,
+        )
+        return self.canvas.create_polygon(points, **kwargs, smooth=True)
+
+    def draw_nodes_on_canvas(self, nodes, x_offset=0):
         canvas_width = 200
         total_ratio = sum(node.ratio for node in nodes)
         canvas_height = sum(
-            (node.ratio / total_ratio) * (self.winfo_screenheight() - 2 * padding)
+            (node.ratio / total_ratio) * (self.winfo_screenheight() - 2 * self.ypad)
             for node in nodes
-        ) + padding * (len(nodes) + 1)
-
-        # canvas = tk.Canvas(root, width=canvas_width, height=canvas_height, bg="white")
-        # self.canvas.pack(pady=padding)
+        ) + self.ypad * (len(nodes) + 1)
 
         x_position = x_offset
         y_position = 0
-        coordinates = []
-
         for node in nodes:
             height = (node.ratio / total_ratio) * (
-                self.winfo_screenheight() - 2 * padding
+                self.winfo_screenheight() - 2 * self.ypad
             )
             width = 150
+
             x1, y1 = x_position, y_position
             x2, y2 = x_position + width, y_position + height
 
-            # Draw the rectangle for the node
-            if node.text != 'None':
-                self.canvas.create_rectangle(x1, y1, x2, y2, fill="lightblue")
+            # Draw the rounded rectangle for the node
+            if node.text != "None":
+                self.create_round_rectangle(
+                    x1, y1, x2, y2, 25, fill=node.color, outline="white", width=3
+                )
+
                 # Calculate text position and add it to the node
                 text_x = (x1 + x2) / 2
                 text_y = (y1 + y2) / 2
-                self.canvas.create_text(text_x, text_y, text=node.text, anchor=tk.CENTER)
+                self.canvas.create_text(
+                    text_x, text_y, text=node.text, anchor=tk.CENTER
+                )
 
                 node.setcordinates((x1, y1, x2, y2))
 
-            # Update the y_position for the next node
-            y_position += height + padding
+                # Update the y_position for the next node
+                y_position += height + self.ypad
 
         return nodes
 
-    def draw_dag(self, vertical_padding=20, horizontal_padding=40):
+    def draw_edges_on_canvas(self, pnodes, nodes, edges):
+        for edge in edges:
+            if edge[0] != None and edge[1] != None:
+                srcVal, dstVal = (edge[0], edge[1])
+                srcNode = None
+                for n in pnodes:
+                    if n.val == srcVal:
+                        srcNode = n
+                        break
+
+                dstNode = None
+                for n in nodes:
+                    if n.val == dstVal:
+                        dstNode = n
+                        break
+
+                sx1, sy1, sx2, sy2 = srcNode.coordinates
+                dx1, dy1, dx2, dy2 = dstNode.coordinates
+
+                # print(sx1, sy1, sx2, sy2)
+                # print(dx1, dy1, dx2, dy2)
+
+                self.canvas.create_line(
+                    sx2, sy1 + (sy2 - sy1) / 2, dx1, dy1 + (dy2 - dy1) / 2,
+                    fill='white',
+                    width=3,
+                    smooth=True,
+                    arrow=tk.LAST
+                )
+
+    def draw_dag(self):
+        prevOffsetNodes = []
         x_offset = 0
         for o in range(0, self.dag.sz):
             print(f"offset {o}")
@@ -263,13 +368,14 @@ class CanvasApp(tk.Tk):
             for v, vct in val_freq:
                 nodes.append(Node(o, v, vct))
             nodes = self.draw_nodes_on_canvas(nodes, x_offset)
-            for node in nodes:
-                print(node.coordinates)
             # Draw Edges
             if o != 0:
-                print(self.dag.get_edge_counts_by_offsets(o - 1, o))
+                edges = self.dag.get_edge_counts_by_offsets(o - 1, o)
+                self.draw_edges_on_canvas(prevOffsetNodes, nodes, edges)
 
-            x_offset += 150 + horizontal_padding
+            x_offset += self.xpad * 2
+
+            prevOffsetNodes = nodes
 
 
 if __name__ == "__main__":
@@ -277,7 +383,7 @@ if __name__ == "__main__":
     # parser.add_argument("fmt", help="input format data [hex]", default="hex")
     # parser.add_argument("sz", help="size of DAG [8]", default=8)
     # args = parser.parse_args()
-    with sqlite3.connect("staging.db") as conn:
+    with sqlite3.connect(":memory:") as conn:
         d = Dag(conn)
         app = CanvasApp(d)
         app.mainloop()
