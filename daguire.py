@@ -54,7 +54,7 @@ class Node:
 
 
 class Dag:
-    def __init__(self, conn: sqlite3.Connection, fmt="hex", sz=56):
+    def __init__(self, conn: sqlite3.Connection, fmt="hex", sz=8):
         self.conn = conn
         self.fmt = fmt
         self.sz = sz
@@ -90,7 +90,7 @@ class Dag:
             for line in sys.stdin:
                 try:
                     # Strip newline characters and parse JSON
-                    byte_line = list(bytearray.fromhex(line.strip()))
+                    byte_line = list(bytearray.fromhex(line.strip()))[:self.sz]
                     if len(byte_line) < self.sz:
                         byte_line.extend([None] * (self.sz - len(byte_line)))
                     # print(byte_line)
@@ -379,11 +379,11 @@ class CanvasApp(tk.Tk):
 
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("fmt", help="input format data [hex]", default="hex")
-    # parser.add_argument("sz", help="size of DAG [8]", default=8)
-    # args = parser.parse_args()
-    with sqlite3.connect(":memory:") as conn:
-        d = Dag(conn)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("fmt", help="input format data [hex]", default="hex")
+    parser.add_argument("sz", help="size of DAG [8]", default=8)
+    args = parser.parse_args()
+    with sqlite3.connect("staging.db") as conn:
+        d = Dag(conn, fmt=args.fmt, sz=int(args.sz))
         app = CanvasApp(d)
         app.mainloop()
