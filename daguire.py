@@ -383,7 +383,7 @@ if __name__ == "__main__":
     parser.add_argument("fmt", help="input format data [hex]", default="hex")
     parser.add_argument("sz", help="size of DAG [8]", default=8)
     args = parser.parse_args()
-    with sqlite3.connect("staging.db") as conn:
+    with sqlite3.connect(":memory:") as conn:
         d = Dag(conn, fmt=args.fmt, sz=int(args.sz))
         app = CanvasApp(d)
         app.mainloop()
