@@ -4,6 +4,8 @@ Directed Acyclic Graph (DAG)
 User Interface (UI)
 Reverse Engineering (RE)
 
+Pronounced like "dagger".
+
 This script reads in arbitrary data samples of varying lengths, performs frequency analysis for a value at a given offset, and graphs the flow diagram.
 
 Scroll wheel on your mouse to zoom in/out. Click and hold to pan.
