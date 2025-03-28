@@ -20,7 +20,7 @@ The graphed node containing the value is color coded according to byte-class:
 0xFF        : White
 ```
 
-All python3 stdlib. No need to pip install anything.
+All python3 stdlib. No need to pip install anything. That also means it's cross platform. It just works.
 
 ```
 usage: daguire.py [-h] fmt sz
