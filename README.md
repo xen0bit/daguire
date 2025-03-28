@@ -8,6 +8,8 @@ Pronounced like "dagger".
 
 This script reads in arbitrary data samples of varying lengths, performs frequency analysis for a value at a given offset, and graphs the flow diagram.
 
+**Input is passed through STDIN.**
+
 Scroll wheel on your mouse to zoom in/out. Click and hold to pan.
 
 Values are single bytes and are graphed complete with their Decimal, Hexidecimal, Binary, and ASCII representations.
