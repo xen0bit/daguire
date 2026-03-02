@@ -6,6 +6,21 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter.filedialog import asksaveasfilename
 
+# Display format options for byte labels (used when drawing nodes)
+def format_byte_label(val: int | None, options: dict[str, bool]) -> str:
+    if val is None:
+        return str(None)
+    parts = []
+    if options.get("decimal", True):
+        parts.append(str(val))
+    if options.get("hex", True):
+        parts.append(f"0x{val:02X}")
+    if options.get("binary", True):
+        parts.append(f"{val:b}")
+    if options.get("ascii", True):
+        parts.append(chr(val) if 0x20 <= val <= 0x7E else "·")
+    return "\n".join(parts) if parts else str(val)
+
 class Node:
     def __init__(self, o: int, v: int | None, ct: int):
         self.offset = o
@@ -29,28 +44,19 @@ class Node:
             return o
 
     def getcolor(self, v):
-        if v == None:
-            return "white"
-        elif v == 0xFF:
-            return "white"
-        elif v == 0x00:
-            return "black"
-        elif v < 0x20:
-            # Red
-            r, g, b = (251, 70, 76)
-            return f"#{r:02x}{g:02x}{b:02x}"
-        elif 0x20 <= v <= 0x7F:
-            # Yellow
-            r, g, b = (224, 222, 113)
-            return f"#{r:02x}{g:02x}{b:02x}"
-        elif 0x7F < v <= 0xBF:
-            # Cyan
-            r, g, b = (83, 223, 221)
-            return f"#{r:02x}{g:02x}{b:02x}"
-        else:
-            # Green
-            r, g, b = (68, 207, 110)
-            return f"#{r:02x}{g:02x}{b:02x}"
+        if v is None:
+            return "#2d2d3a"
+        if v == 0xFF:
+            return "#3d3d4a"
+        if v == 0x00:
+            return "#1a1a24"
+        if v < 0x20:
+            return "#c45c5c"   # muted red (control chars)
+        if 0x20 <= v <= 0x7F:
+            return "#b8a84e"   # muted yellow (printable ASCII)
+        if 0x7F < v <= 0xBF:
+            return "#4a9b99"   # muted cyan
+        return "#4a9b6a"       # muted green
 
 
 class Dag:
@@ -135,28 +141,40 @@ class Dag:
 
 
 class CanvasApp(tk.Tk):
+    # Theme: dark, modern palette
+    THEME = {
+        "bg": "#0f0f14",
+        "toolbar_bg": "#16161e",
+        "canvas_bg": "#1a1a24",
+        "node_outline": "#3d3d5c",
+        "node_outline_width": 2,
+        "node_text": "#e4e4e7",
+        "node_text_light": "#fafafa",
+        "font": ("Consolas", 10),
+        "toolbar_fg": "#a0a0b0",
+        "accent": "#7c3aed",
+    }
+
     def __init__(self, dag: Dag):
         super().__init__()
         self.dag = dag
         self.xpad = 150
         self.ypad = 150
+        self.theme = self.THEME.copy()
+        self.display_options = {"decimal": True, "hex": True, "binary": True, "ascii": True}
 
         self.title("DAGUIRE")
+        self.configure(bg=self.theme["bg"])
         if sys.platform == "win32":
             self.state("zoomed")
         else:
             self.wm_attributes("-zoomed", 1)
-        button_frame = tk.Frame(self)
-        button_frame.pack(fill="x")
-        save_ps_button = ttk.Button(
-            button_frame,
-            text="Save Canvas as PS",
-            command=self.save_canvas_as_ps
-        )
-        save_ps_button.pack(side="left")
-        self.frame = tk.Frame(self)
+
+        self._setup_styles()
+        self._build_toolbar()
+        self.frame = tk.Frame(self, bg=self.theme["bg"])
         self.frame.pack(fill="both", expand=True)
-        self.canvas = tk.Canvas(self.frame, bg="#1e1e1e")
+        self.canvas = tk.Canvas(self.frame, bg=self.theme["canvas_bg"], highlightthickness=0)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.canvas.bind("<Button-4>", self.on_mousewheel)
@@ -164,6 +182,62 @@ class CanvasApp(tk.Tk):
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.pan_canvas)
 
+        self.draw_dag()
+
+    def _setup_styles(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure(
+            "Toolbar.TFrame",
+            background=self.theme["toolbar_bg"],
+        )
+        style.configure(
+            "Toolbar.TCheckbutton",
+            background=self.theme["toolbar_bg"],
+            foreground=self.theme["toolbar_fg"],
+            font=self.theme["font"],
+        )
+        style.configure(
+            "Toolbar.TButton",
+            background=self.theme["toolbar_bg"],
+            foreground=self.theme["toolbar_fg"],
+            font=self.theme["font"],
+        )
+        style.map("Toolbar.TButton", background=[("active", self.theme["accent"])])
+        style.configure(
+            "Toolbar.TLabel",
+            background=self.theme["toolbar_bg"],
+            foreground=self.theme["toolbar_fg"],
+            font=self.theme["font"],
+        )
+
+    def _build_toolbar(self):
+        toolbar = ttk.Frame(self, style="Toolbar.TFrame", padding=(10, 8))
+        toolbar.pack(fill="x")
+
+        ttk.Button(toolbar, text="Save as PS…", style="Toolbar.TButton", command=self.save_canvas_as_ps).pack(side="left", padx=(0, 16))
+
+        sep = tk.Frame(toolbar, width=1, bg=self.theme["node_outline"])
+        sep.pack(side="left", fill="y", padx=8, pady=2)
+
+        label = ttk.Label(toolbar, text="Node label:", style="Toolbar.TLabel")
+        label.pack(side="left", padx=(0, 6))
+        for key, label_text in [("decimal", "Dec"), ("hex", "Hex"), ("binary", "Bin"), ("ascii", "ASCII")]:
+            var = tk.BooleanVar(value=self.display_options[key])
+            var.trace_add("write", self._on_display_option_changed)
+            self.display_options[f"_var_{key}"] = var
+            cb = ttk.Checkbutton(toolbar, text=label_text, variable=var, style="Toolbar.TCheckbutton")
+            cb.pack(side="left", padx=2)
+
+    def _on_display_option_changed(self, *args):
+        for k in ("decimal", "hex", "binary", "ascii"):
+            var = self.display_options.get(f"_var_{k}")
+            if isinstance(var, tk.BooleanVar):
+                self.display_options[k] = var.get()
+        self.redraw_dag()
+
+    def redraw_dag(self):
+        self.canvas.delete("all")
         self.draw_dag()
 
     def save_canvas_as_ps(self):
@@ -189,6 +263,7 @@ class CanvasApp(tk.Tk):
         dx = event.x - self.panx
         dy = event.y - self.pany
         self.canvas.scan_dragto(dx, dy, gain=1)
+        self.panx, self.pany = event.x, event.y
 
     def create_round_rectangle(self, x1, y1, x2, y2, r=25, **kwargs):
         points = (
@@ -246,20 +321,17 @@ class CanvasApp(tk.Tk):
             width = 150
             x1, y1 = x_position, y_position
             x2, y2 = x_position + width, y_position + height
-            if node.text != "None":
+            if node.val is not None:
+                label = format_byte_label(node.val, self.display_options)
                 self.create_round_rectangle(
-                    x1, y1, x2, y2, 25, fill=node.color, outline="white", width=3
+                    x1, y1, x2, y2, 25, fill=node.color, outline=self.theme["node_outline"], width=self.theme["node_outline_width"]
                 )
                 text_x = (x1 + x2) / 2
                 text_y = (y1 + y2) / 2
-                if node.val == 0x00:
-                    self.canvas.create_text(
-                    text_x, text_y, text=node.text, fill='white', anchor=tk.CENTER, font='TkFixedFont'
+                text_fill = self.theme["node_text_light"] if node.val == 0x00 else self.theme["node_text"]
+                self.canvas.create_text(
+                    text_x, text_y, text=label, fill=text_fill, anchor=tk.CENTER, font=self.theme["font"]
                 )
-                else:
-                    self.canvas.create_text(
-                        text_x, text_y, text=node.text, anchor=tk.CENTER, font='TkFixedFont'
-                    )
                 node.setcordinates((x1, y1, x2, y2))
                 y_position += height + self.ypad
 
@@ -283,10 +355,10 @@ class CanvasApp(tk.Tk):
                 dx1, dy1, _, dy2 = dstNode.coordinates
                 self.canvas.create_line(
                     sx2, sy1 + (sy2 - sy1) / 2, dx1, dy1 + (dy2 - dy1) / 2,
-                    fill='white',
-                    width=3,
+                    fill=self.theme["node_text"],
+                    width=2,
                     smooth=True,
-                    arrow=tk.LAST
+                    arrow=tk.LAST,
                 )
 
     def draw_dag(self):
