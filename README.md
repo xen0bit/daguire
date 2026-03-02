@@ -26,6 +26,14 @@ The graphed node containing the value is color coded according to byte-class:
 
 All python3 stdlib. No need to pip install anything. That also means it's cross platform. It just works.
 
+This repo is a [uv](https://docs.astral.sh/uv/) project. From the project directory:
+
+```bash
+uv run daguire hex 8
+```
+
+Or run the script directly: `uv run python daguire.py hex 8`. Once published to PyPI, you can run it from anywhere with `uvx run daguire hex 8`.
+
 ```
 usage: daguire.py [-h] fmt sz
 
@@ -42,13 +50,13 @@ options:
 ## Protocol reverse engineering
 
 ```bash
-tshark -r sample.pcap -T fields -e data | python3 daguire.py hex 1024
+tshark -r sample.pcap -T fields -e data | uv run daguire hex 1024
 ```
 
 ## File format reverse engineering
 
 ```bash
-find "/home/remy/firmware_downloads/" -name "vendorXproductYversion*.bin" | python3 daguire.py file 1999
+find "/home/remy/firmware_downloads/" -name "vendorXproductYversion*.bin" | uv run daguire file 1999
 ```
 
 ## Other

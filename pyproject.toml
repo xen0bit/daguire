@@ -1,0 +1,17 @@
+[project]
+name = "daguire"
+version = "0.1.0"
+description = "DAG UI for Reverse Engineering - frequency analysis and flow diagram for binary data"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+daguire = "daguire:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["daguire.py"]

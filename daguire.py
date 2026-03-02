@@ -102,7 +102,7 @@ class Dag:
                 cur.execute(iq, byte_line)
             except:
                 print(f"Failure parsing: {line.strip()}", file=sys.stderr)
-        conn.commit()
+        self.conn.commit()
 
     def read_files(self):
         print("Reading data from FILES")
@@ -117,7 +117,7 @@ class Dag:
                     cur.execute(iq, byte_line)
             except Exception as e:
                 print(f"Failure parsing: {path.strip()}, {e}", file=sys.stderr)
-        conn.commit()
+        self.conn.commit()
 
     def get_val_counts_by_offset(self, o: int):
         cur = self.conn.cursor()
@@ -142,7 +142,10 @@ class CanvasApp(tk.Tk):
         self.ypad = 150
 
         self.title("DAGUIRE")
-        self.wm_attributes("-zoomed", 1)
+        if sys.platform == "win32":
+            self.state("zoomed")
+        else:
+            self.wm_attributes("-zoomed", 1)
         button_frame = tk.Frame(self)
         button_frame.pack(fill="x")
         save_ps_button = ttk.Button(
@@ -302,7 +305,7 @@ class CanvasApp(tk.Tk):
             prevOffsetNodes = nodes
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("fmt", help="input format data [hex, file]", default="hex")
     parser.add_argument("sz", help="size of DAG [8]", default=8)
@@ -314,3 +317,7 @@ if __name__ == "__main__":
             d = Dag(conn, fmt=args.fmt, sz=int(args.sz))
             app = CanvasApp(d)
             app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

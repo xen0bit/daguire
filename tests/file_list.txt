@@ -1,0 +1,3 @@
+tests/bin/sample1.bin
+tests/bin/sample2.bin
+tests/bin/sample3.bin
