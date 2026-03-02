@@ -216,6 +216,7 @@ class CanvasApp(tk.Tk):
         toolbar.pack(fill="x")
 
         ttk.Button(toolbar, text="Save as PS…", style="Toolbar.TButton", command=self.save_canvas_as_ps).pack(side="left", padx=(0, 16))
+        ttk.Button(toolbar, text="Fit to Canvas", style="Toolbar.TButton", command=self.fit_to_canvas).pack(side="left", padx=(0, 16))
 
         sep = tk.Frame(toolbar, width=1, bg=self.theme["node_outline"])
         sep.pack(side="left", fill="y", padx=8, pady=2)
@@ -247,6 +248,37 @@ class CanvasApp(tk.Tk):
         self.update()
         self.canvas.postscript(file=filepath, colormode='color')
 
+    def fit_to_canvas(self):
+        self.canvas.update_idletasks()
+        bbox = self.canvas.bbox("all")
+        if not bbox:
+            return
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        if cw <= 1 or ch <= 1:
+            return
+        content_w = bbox[2] - bbox[0]
+        content_h = bbox[3] - bbox[1]
+        if content_w <= 0 or content_h <= 0:
+            return
+        margin = 0.9
+        scale = min(cw / content_w, ch / content_h) * margin
+        cx = (bbox[0] + bbox[2]) / 2
+        cy = (bbox[1] + bbox[3]) / 2
+        self.canvas.scale("all", cx, cy, scale, scale)
+        bbox2 = self.canvas.bbox("all")
+        if not bbox2:
+            return
+        self.canvas.configure(scrollregion=bbox2)
+        sw = bbox2[2] - bbox2[0]
+        sh = bbox2[3] - bbox2[1]
+        center_x = (bbox2[0] + bbox2[2]) / 2
+        center_y = (bbox2[1] + bbox2[3]) / 2
+        fx = max(0, min(1, (center_x - cw / 2) / sw)) if sw > 0 else 0
+        fy = max(0, min(1, (center_y - ch / 2) / sh)) if sh > 0 else 0
+        self.canvas.xview_moveto(fx)
+        self.canvas.yview_moveto(fy)
+
     def on_mousewheel(self, event):
         if event.delta > 0 or event.num == 4:
             scale_factor = 1.1
@@ -256,14 +288,20 @@ class CanvasApp(tk.Tk):
         y = self.canvas.canvasy(event.y)
         self.canvas.scale("all", x, y, scale_factor, scale_factor)
 
+    # Pan sensitivity: Tk multiplies scan delta by 10, so we scale coords for 1:1 feel
+    PAN_GAIN = 0.1
+
     def on_button_press(self, event):
-        self.panx, self.pany = event.x, event.y
+        self._pan_start = (event.x, event.y)
+        self.canvas.scan_mark(event.x, event.y)
 
     def pan_canvas(self, event):
-        dx = event.x - self.panx
-        dy = event.y - self.pany
-        self.canvas.scan_dragto(dx, dy, gain=1)
-        self.panx, self.pany = event.x, event.y
+        sx, sy = self._pan_start
+        # Pass coords so effective delta is (dx, dy) * PAN_GAIN; Tk then *10 → 1:1
+        self.canvas.scan_dragto(
+            sx + (event.x - sx) * self.PAN_GAIN,
+            sy + (event.y - sy) * self.PAN_GAIN,
+        )
 
     def create_round_rectangle(self, x1, y1, x2, y2, r=25, **kwargs):
         points = (
