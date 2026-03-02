@@ -298,10 +298,10 @@ class CanvasApp(tk.Tk):
     def pan_canvas(self, event):
         sx, sy = self._pan_start
         # Pass coords so effective delta is (dx, dy) * PAN_GAIN; Tk then *10 → 1:1
-        self.canvas.scan_dragto(
-            sx + (event.x - sx) * self.PAN_GAIN,
-            sy + (event.y - sy) * self.PAN_GAIN,
-        )
+        # scan_dragto requires integers
+        x = int(sx + (event.x - sx) * self.PAN_GAIN)
+        y = int(sy + (event.y - sy) * self.PAN_GAIN)
+        self.canvas.scan_dragto(x, y)
 
     def create_round_rectangle(self, x1, y1, x2, y2, r=25, **kwargs):
         points = (
