@@ -2,6 +2,7 @@
 import sys
 import sqlite3
 import argparse
+import xml.sax.saxutils as saxutils
 import tkinter as tk
 from tkinter import ttk
 from tkinter.filedialog import asksaveasfilename
@@ -257,6 +258,7 @@ class CanvasApp(tk.Tk):
         toolbar = ttk.Frame(self, style="Toolbar.TFrame", padding=(10, 8))
         toolbar.pack(fill="x")
 
+        ttk.Button(toolbar, text="Save as SVG…", style="Toolbar.TButton", command=self.save_canvas_as_svg).pack(side="left", padx=(0, 16))
         ttk.Button(toolbar, text="Save as PS…", style="Toolbar.TButton", command=self.save_canvas_as_ps).pack(side="left", padx=(0, 16))
         ttk.Button(toolbar, text="Fit to Canvas", style="Toolbar.TButton", command=self.fit_to_canvas).pack(side="left", padx=(0, 16))
 
@@ -321,12 +323,106 @@ class CanvasApp(tk.Tk):
         self.canvas.delete("all")
         self.draw_dag()
 
+    def save_canvas_as_svg(self):
+        filepath = asksaveasfilename(defaultextension=".svg", filetypes=[("SVG files", "*.svg"), ("All Files", "*.*")])
+        if not filepath:
+            return
+        self._write_svg(filepath)
+
     def save_canvas_as_ps(self):
         filepath = asksaveasfilename(defaultextension=".eps", filetypes=[("PostScript files", "*.eps"), ("All Files", "*.*")])
         if not filepath:
             return
         self.update()
         self.canvas.postscript(file=filepath, colormode='color')
+
+    def _write_svg(self, filepath: str):
+        """Export current DAG view to lossless SVG using the same layout as the canvas."""
+        visible_nodes = self.dag.get_visible_nodes_filtered(self.filter_seeds) if self.filter_seeds else None
+        col_height = 600
+        node_width = 150
+        r = 25
+        prev_offset_nodes = []
+        x_offset = 0
+        shapes = []  # (kind, ...) for nodes/edges
+        layout_max_y = 0
+        for o in range(0, self.dag.sz):
+            nodes = []
+            for v, vct in self.dag.get_val_counts_by_offset(o):
+                if visible_nodes is None or (o, v) in visible_nodes:
+                    nodes.append(Node(o, v, vct))
+            total_ratio = sum(n.ratio for n in nodes)
+            y_position = 0
+            for node in nodes:
+                height = (node.ratio / total_ratio) * (col_height - 2 * self.ypad) if total_ratio else 0
+                x1, y1 = x_offset, y_position
+                x2, y2 = x_offset + node_width, y_position + height
+                if node.val is not None:
+                    label = format_byte_label(node.val, self.display_options)
+                    text_fill = self.theme["node_text_light"] if node.val == 0x00 else self.theme["node_text"]
+                    node.setcordinates((x1, y1, x2, y2))
+                    shapes.append(("node", x1, y1, x2, y2, node.color, self.theme["node_outline"], label, text_fill))
+                y_position += height + self.ypad
+            layout_max_y = max(layout_max_y, y_position)
+            if o != 0:
+                edges = self.dag.get_edge_counts_by_offsets(o - 1, o)
+                o_prev, o_curr = o - 1, o
+                for edge in edges:
+                    if edge[0] is None or edge[1] is None:
+                        continue
+                    src_val, dst_val = edge[0], edge[1]
+                    if visible_nodes is not None:
+                        if (o_prev, src_val) not in visible_nodes or (o_curr, dst_val) not in visible_nodes:
+                            continue
+                    src_node = next((n for n in prev_offset_nodes if n.val == src_val), None)
+                    dst_node = next((n for n in nodes if n.val == dst_val), None)
+                    if src_node is None or dst_node is None:
+                        continue
+                    _, sy1, sx2, sy2 = src_node.coordinates
+                    dx1, dy1, _, dy2 = dst_node.coordinates
+                    x1 = sx2
+                    y1 = sy1 + (sy2 - sy1) / 2
+                    x2 = dx1
+                    y2 = dy1 + (dy2 - dy1) / 2
+                    shapes.append(("edge", x1, y1, x2, y2))
+            x_offset += self.xpad * 2
+            prev_offset_nodes = nodes
+        # Use full layout extent so nothing is clipped (right/bottom columns can extend past shape max)
+        layout_right = (self.dag.sz - 1) * (self.xpad * 2) + node_width + self.xpad
+        layout_bottom = layout_max_y + self.ypad
+        if not shapes:
+            w, h = 800, 600
+        else:
+            shape_max_x = max(s[2] if s[0] == "node" else max(s[1], s[2]) for s in shapes)
+            shape_max_y = max(s[4] if s[0] == "node" else max(s[3], s[4]) for s in shapes)
+            w = int(max(shape_max_x, layout_right) + self.xpad)
+            h = int(max(shape_max_y, layout_bottom) + self.ypad)
+        font_name, font_size = self.theme["font"][0], self.theme["font"][1]
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
+            f'  <defs><marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="{self.theme["node_text"]}"/></marker></defs>',
+            f'  <rect width="{w}" height="{h}" fill="{self.theme["canvas_bg"]}"/>',
+        ]
+        for s in shapes:
+            if s[0] == "edge":
+                _, x1, y1, x2, y2 = s
+                lines.append(f'  <line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{self.theme["node_text"]}" stroke-width="2" marker-end="url(#arrow)"/>')
+        for s in shapes:
+            if s[0] == "node":
+                _, x1, y1, x2, y2, fill, stroke, label, text_fill = s
+                lines.append(f'  <rect x="{x1:.1f}" y="{y1:.1f}" width="{x2-x1:.1f}" height="{y2-y1:.1f}" rx="{r}" ry="{r}" fill="{fill}" stroke="{stroke}" stroke-width="{self.theme["node_outline_width"]}"/>')
+                text_x, text_y = (x1 + x2) / 2, (y1 + y2) / 2
+                label_lines = label.split("\n")
+                line_height = font_size * 1.2
+                start_y = text_y - (len(label_lines) - 1) * line_height / 2
+                for i, line in enumerate(label_lines):
+                    escaped = saxutils.escape(line)
+                    dy = start_y + i * line_height
+                    lines.append(f'  <text x="{text_x:.1f}" y="{dy:.1f}" text-anchor="middle" dominant-baseline="middle" fill="{text_fill}" font-family="{font_name}" font-size="{font_size}">{escaped}</text>')
+        lines.append("</svg>")
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
 
     def fit_to_canvas(self):
         self.canvas.update_idletasks()
