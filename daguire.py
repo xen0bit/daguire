@@ -139,6 +139,46 @@ class Dag:
         )
         return res.fetchall()
 
+    def get_downstream_from(self, seeds: set[tuple[int, int]]) -> set[tuple[int, int]]:
+        """All (offset, value) nodes reachable by following edges forward from seeds."""
+        if not seeds:
+            return set()
+        reachable = set(seeds)
+        for o in range(0, self.sz - 1):
+            for (off, val) in list(reachable):
+                if off != o:
+                    continue
+                for row in self.get_edge_counts_by_offsets(o, o + 1):
+                    if row[0] == val:
+                        reachable.add((o + 1, row[1]))
+        return reachable
+
+    def get_visible_nodes_filtered(self, seeds: set[tuple[int, int]]) -> set[tuple[int, int]]:
+        """Per-offset filter: at each offset, show only seed values at that offset (if any), else show nodes reachable from previous offset."""
+        if not seeds:
+            return set()
+        visible = set()
+        values_at_0 = {v for (v, _) in self.get_val_counts_by_offset(0)}
+        seeds_at_0 = {v for (o, v) in seeds if o == 0}
+        if seeds_at_0:
+            visible |= {(0, v) for v in (seeds_at_0 & values_at_0)}
+        else:
+            visible |= {(0, v) for v in values_at_0}
+        for o in range(1, self.sz):
+            values_at_o = {v for (v, _) in self.get_val_counts_by_offset(o)}
+            reachable = set()
+            for row in self.get_edge_counts_by_offsets(o - 1, o):
+                v_prev, v_cur, _ = row[0], row[1], row[2]
+                if (o - 1, v_prev) in visible:
+                    reachable.add(v_cur)
+            seeds_at_o = {v for (o2, v) in seeds if o2 == o}
+            if seeds_at_o:
+                show_o = (seeds_at_o & values_at_o)
+            else:
+                show_o = reachable & values_at_o
+            visible |= {(o, v) for v in show_o}
+        return visible
+
 
 class CanvasApp(tk.Tk):
     # Theme: dark, modern palette
@@ -162,6 +202,7 @@ class CanvasApp(tk.Tk):
         self.ypad = 150
         self.theme = self.THEME.copy()
         self.display_options = {"decimal": True, "hex": True, "binary": True, "ascii": True}
+        self.filter_seeds: set[tuple[int, int]] = set()  # (offset, value) — click to filter, Ctrl+click to add
 
         self.title("DAGUIRE")
         self.configure(bg=self.theme["bg"])
@@ -181,6 +222,7 @@ class CanvasApp(tk.Tk):
         self.canvas.bind("<Button-5>", self.on_mousewheel)
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.pan_canvas)
+        self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
         self.draw_dag()
 
@@ -229,6 +271,44 @@ class CanvasApp(tk.Tk):
             self.display_options[f"_var_{key}"] = var
             cb = ttk.Checkbutton(toolbar, text=label_text, variable=var, style="Toolbar.TCheckbutton")
             cb.pack(side="left", padx=2)
+
+        # Filter bar (second row): shows filter seeds and Clear
+        self.filter_bar = ttk.Frame(self, style="Toolbar.TFrame", padding=(10, 4))
+        self.filter_bar.pack(fill="x")
+        self._filter_chips_frame = ttk.Frame(self.filter_bar, style="Toolbar.TFrame")
+        self._filter_chips_frame.pack(side="left", fill="x", expand=True)
+        self._filter_placeholder = ttk.Label(
+            self.filter_bar, text="Filter: click a node to show only downstream; Ctrl+click to add", style="Toolbar.TLabel"
+        )
+        self._filter_placeholder.pack(side="left")
+        self._update_filter_bar()
+
+    def _update_filter_bar(self):
+        for w in self._filter_chips_frame.winfo_children():
+            w.destroy()
+        if not self.filter_seeds:
+            self._filter_placeholder.pack(side="left")
+            return
+        self._filter_placeholder.pack_forget()
+        ttk.Label(self._filter_chips_frame, text="Filter:", style="Toolbar.TLabel").pack(side="left", padx=(0, 6))
+        for (offset, val) in sorted(self.filter_seeds):
+            chip = ttk.Frame(self._filter_chips_frame, style="Toolbar.TFrame")
+            chip.pack(side="left", padx=2)
+            lbl = ttk.Label(chip, text=f"0x{val:02X} @ {offset}", style="Toolbar.TLabel")
+            lbl.pack(side="left", padx=(4, 2), pady=2)
+            btn = ttk.Button(chip, text="×", style="Toolbar.TButton", width=2, command=lambda o=offset, v=val: self._remove_filter_seed(o, v))
+            btn.pack(side="left", padx=(0, 4), pady=2)
+        ttk.Button(self._filter_chips_frame, text="Clear", style="Toolbar.TButton", command=self._clear_filter).pack(side="left", padx=(8, 0))
+
+    def _remove_filter_seed(self, offset: int, val: int):
+        self.filter_seeds.discard((offset, val))
+        self._update_filter_bar()
+        self.redraw_dag()
+
+    def _clear_filter(self):
+        self.filter_seeds.clear()
+        self._update_filter_bar()
+        self.redraw_dag()
 
     def _on_display_option_changed(self, *args):
         for k in ("decimal", "hex", "binary", "ascii"):
@@ -303,7 +383,35 @@ class CanvasApp(tk.Tk):
         y = int(sy + (event.y - sy) * self.PAN_GAIN)
         self.canvas.scan_dragto(x, y)
 
-    def create_round_rectangle(self, x1, y1, x2, y2, r=25, **kwargs):
+    _CLICK_THRESHOLD = 5
+
+    def on_button_release(self, event):
+        dx = abs(event.x - self._pan_start[0])
+        dy = abs(event.y - self._pan_start[1])
+        if dx > self._CLICK_THRESHOLD or dy > self._CLICK_THRESHOLD:
+            return  # was a pan, not a click
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        items = self.canvas.find_overlapping(cx, cy, cx, cy)
+        for iid in reversed(items):
+            tags = self.canvas.gettags(iid)
+            for t in tags:
+                if t.startswith("node_") and t != "node":
+                    parts = t.split("_")
+                    if len(parts) == 3:
+                        try:
+                            offset, val = int(parts[1]), int(parts[2])
+                            # Always add clicked node to filter (Ctrl or not); use Clear to reset
+                            self.filter_seeds.add((offset, val))
+                            self._update_filter_bar()
+                            self.redraw_dag()
+                        except ValueError:
+                            pass
+                    return
+
+    def create_round_rectangle(self, x1, y1, x2, y2, r=25, tags=(), **kwargs):
+        if "tags" in kwargs:
+            tags = kwargs.pop("tags")
         points = (
             x1 + r,
             y1,
@@ -346,9 +454,9 @@ class CanvasApp(tk.Tk):
             x1,
             y1,
         )
-        return self.canvas.create_polygon(points, **kwargs, smooth=True)
+        return self.canvas.create_polygon(points, tags=tags, **kwargs, smooth=True)
 
-    def draw_nodes_on_canvas(self, nodes, x_offset=0):
+    def draw_nodes_on_canvas(self, nodes, x_offset: int, offset: int):
         total_ratio = sum(node.ratio for node in nodes)
         x_position = x_offset
         y_position = 0
@@ -360,37 +468,37 @@ class CanvasApp(tk.Tk):
             x1, y1 = x_position, y_position
             x2, y2 = x_position + width, y_position + height
             if node.val is not None:
+                tag = f"node_{offset}_{node.val}"
+                tags = ("node", tag)
                 label = format_byte_label(node.val, self.display_options)
                 self.create_round_rectangle(
-                    x1, y1, x2, y2, 25, fill=node.color, outline=self.theme["node_outline"], width=self.theme["node_outline_width"]
+                    x1, y1, x2, y2, 25, fill=node.color, outline=self.theme["node_outline"], width=self.theme["node_outline_width"], tags=tags
                 )
                 text_x = (x1 + x2) / 2
                 text_y = (y1 + y2) / 2
                 text_fill = self.theme["node_text_light"] if node.val == 0x00 else self.theme["node_text"]
                 self.canvas.create_text(
-                    text_x, text_y, text=label, fill=text_fill, anchor=tk.CENTER, font=self.theme["font"]
+                    text_x, text_y, text=label, fill=text_fill, anchor=tk.CENTER, font=self.theme["font"], tags=tags
                 )
                 node.setcordinates((x1, y1, x2, y2))
                 y_position += height + self.ypad
 
         return nodes
 
-    def draw_edges_on_canvas(self, pnodes, nodes, edges):
+    def draw_edges_on_canvas(self, pnodes, nodes, edges, current_offset: int, visible_nodes=None):
+        o_prev, o_curr = current_offset - 1, current_offset
         for edge in edges:
-            if edge[0] != None and edge[1] != None:
-                srcVal, dstVal = (edge[0], edge[1])
-                srcNode = None
-                for n in pnodes:
-                    if n.val == srcVal:
-                        srcNode = n
-                        break
-                dstNode = None
-                for n in nodes:
-                    if n.val == dstVal:
-                        dstNode = n
-                        break
-                _, sy1, sx2, sy2 = srcNode.coordinates
-                dx1, dy1, _, dy2 = dstNode.coordinates
+            if edge[0] is not None and edge[1] is not None:
+                src_val, dst_val = (edge[0], edge[1])
+                if visible_nodes is not None:
+                    if (o_prev, src_val) not in visible_nodes or (o_curr, dst_val) not in visible_nodes:
+                        continue
+                src_node = next((n for n in pnodes if n.val == src_val), None)
+                dst_node = next((n for n in nodes if n.val == dst_val), None)
+                if src_node is None or dst_node is None:
+                    continue
+                _, sy1, sx2, sy2 = src_node.coordinates
+                dx1, dy1, _, dy2 = dst_node.coordinates
                 self.canvas.create_line(
                     sx2, sy1 + (sy2 - sy1) / 2, dx1, dy1 + (dy2 - dy1) / 2,
                     fill=self.theme["node_text"],
@@ -400,19 +508,20 @@ class CanvasApp(tk.Tk):
                 )
 
     def draw_dag(self):
-        prevOffsetNodes = []
+        visible_nodes = self.dag.get_visible_nodes_filtered(self.filter_seeds) if self.filter_seeds else None
+        prev_offset_nodes = []
         x_offset = 0
         for o in range(0, self.dag.sz):
             nodes = []
-            val_freq = self.dag.get_val_counts_by_offset(o)
-            for v, vct in val_freq:
-                nodes.append(Node(o, v, vct))
-            nodes = self.draw_nodes_on_canvas(nodes, x_offset)
+            for v, vct in self.dag.get_val_counts_by_offset(o):
+                if visible_nodes is None or (o, v) in visible_nodes:
+                    nodes.append(Node(o, v, vct))
+            nodes = self.draw_nodes_on_canvas(nodes, x_offset, o)
             if o != 0:
                 edges = self.dag.get_edge_counts_by_offsets(o - 1, o)
-                self.draw_edges_on_canvas(prevOffsetNodes, nodes, edges)
+                self.draw_edges_on_canvas(prev_offset_nodes, nodes, edges, o, visible_nodes)
             x_offset += self.xpad * 2
-            prevOffsetNodes = nodes
+            prev_offset_nodes = nodes
 
 
 def main():
