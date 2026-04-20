@@ -1,0 +1,37 @@
+{
+  "name": "simple_header",
+  "version": 1,
+  "description": "Simple header with magic bytes and pad field",
+  "endian": "big",
+  "fields": [
+    {
+      "name": "magic",
+      "type": "magic(4)",
+      "offset": 0,
+      "size": 4,
+      "magic_value": "deadbeef",
+      "description": "Magic bytes 0xDEADBEEF"
+    },
+    {
+      "name": "flags",
+      "type": "u8",
+      "offset": 4,
+      "size": 1,
+      "description": "Flags byte"
+    },
+    {
+      "name": "pad",
+      "type": "pad",
+      "offset": 5,
+      "align_to": 2,
+      "description": "Padding to align next field"
+    },
+    {
+      "name": "length",
+      "type": "u16be",
+      "offset": 6,
+      "size": 2,
+      "description": "Payload length"
+    }
+  ]
+}
