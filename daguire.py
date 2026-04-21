@@ -1058,6 +1058,7 @@ class CanvasRenderer:
         layout: LayoutResult,
         display_options: dict[str, bool],
         filter_seeds: set[tuple[int, int]] | None = None,
+        dag=None,
     ):
         """Render layout to tkinter canvas."""
         font_name, font_size = self.theme["font"][0], self.theme["font"][1]
@@ -3196,7 +3197,9 @@ class CanvasApp(tk.Tk):
             use_aligned=self.use_aligned,
             show_structure=self.structure is not None,
         )
-        self.canvas_renderer.render(layout, self.display_options, self.filter_seeds)
+        self.canvas_renderer.render(
+            layout, self.display_options, self.filter_seeds, self.dag
+        )
 
 
 def main():
