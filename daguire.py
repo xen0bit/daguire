@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 from pathlib import Path
 
-# Tkinter imports are deferred to allow headless SVG export without tkinter installed
-tk = None
-ttk = None
-asksaveasfilename = None
+# Tkinter imports
+import tkinter as tk
+from tkinter import ttk
+from tkinter.filedialog import asksaveasfilename
 
 
 # ============================================================================
@@ -1050,8 +1050,6 @@ class CanvasRenderer:
         self.ypad = ypad
         self.node_width = 150
         self.r = 25
-        # Import tkinter here for the LAST constant
-        import tkinter as tk
 
         self.tk_module = tk
 
@@ -1616,8 +1614,7 @@ class StructureEditorDialog:
         dag_sz: int = 8,
         on_apply: Optional[callable] = None,
     ):
-        import tkinter as tk
-        from tkinter import ttk, simpledialog, messagebox
+        from tkinter import simpledialog, messagebox
 
         self.tk_module = tk
         self.ttk_module = ttk
@@ -2284,7 +2281,7 @@ class StructureEditorDialog:
         self.dialog.destroy()
 
 
-class CanvasApp:
+class CanvasApp(tk.Tk):
     # Theme: dark, modern palette
     THEME = {
         "bg": "#0f0f14",
@@ -2300,16 +2297,10 @@ class CanvasApp:
     }
 
     def __init__(self, dag: Dag, structure: Optional[Structure] = None):
-        # Import tkinter here to allow headless SVG export without tkinter
-        import tkinter as tk
-        from tkinter import ttk
-        from tkinter.filedialog import asksaveasfilename
-
+        super().__init__()
         self.tk_module = tk
         self.ttk_module = ttk
         self.asksaveasfilename = asksaveasfilename
-
-        tk.Tk.__init__(self)
         self.dag = dag
         self.structure = structure
         self.xpad = 150
